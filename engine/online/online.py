@@ -107,7 +107,7 @@ def configure_online(settings, data, env):
     os.replace(temporary, destination)
     env.update(BB_ONLINE='1', BB_SHADNET_SERVER=(f'[{host}]' if ':' in host else host) + f':{port}',
                BB_SHADNET_WEBAPI=webapi, BB_SHADNET_NPID=username,
-               BB_UPNP='1' if settings.get('online_upnp') == '1' else '0',
+               BB_UPNP='0' if settings.get('online_upnp') == '0' else '1',
                BB_P2P_PORT=str(int(p2p)) if p2p else str(DEFAULT_P2P_PORT),
                SHADPS4_HTTP_HOST_OVERRIDES_JSON=str(destination.resolve()))
     timeout = settings.get('online_sign_timeout', '').strip()

@@ -32,7 +32,7 @@ index a87556c..e3ba25a 100644
 +void InitializeRuntime();
  } // namespace Libraries::Np::NpManager
 diff --git a/a/shadnet/client.cpp b/b/shadnet/client.cpp
-index 1d8b958..5e74584 100644
+index 1d8b958..f05d5cb 100644
 --- a/a/shadnet/client.cpp
 +++ b/b/shadnet/client.cpp
 @@ -558,18 +558,8 @@ static std::vector<u8> MakeComIdPayload(const std::string& com_id, const std::st
@@ -52,7 +52,7 @@ index 1d8b958..5e74584 100644
 -                    : fmt::format("shadPS4 v{} {}/{} {}", Common::g_version, remote_host,
 -                                  Common::g_scm_branch, Common::g_scm_desc);
 +    const char* env = std::getenv("BB_CLIENT_VERSION");
-+    return env && *env ? env : "BloodBorneButPc";
++    return env && *env ? env : "shadPS4 Awakenchan/v0.20.0";
  }
  
  u64 ShadNetClient::ReportClientVersion() {
