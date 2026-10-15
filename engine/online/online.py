@@ -72,6 +72,10 @@ ONLINE_PAUSED = os.environ.get('BB_ONLINE_PAUSED', '1') != '0'
 
 
 def configure_online(settings, data, env):
+    # The Hunter's Dream pool is the reworked connection: the pause is the shadNet pool's.
+    if (settings.get('online_pool') == 'huntersdream' and settings.get('online_enabled') == '1' and
+            settings.get('online_connected', '1') == '1'):
+        return configure_huntersdream(settings, data, env)
     if ONLINE_PAUSED and settings.get('online_enabled') == '1':
         print("Online: paused in this version while we rework the connection together with the shadNet "
               "and The Hunter's Dream teams; the game starts offline", flush=True)
@@ -81,8 +85,6 @@ def configure_online(settings, data, env):
             env.pop(key, None)
         env['BB_ONLINE'] = '0'
         return None
-    if settings.get('online_pool') == 'huntersdream':
-        return configure_huntersdream(settings, data, env)
     for key in THD_ENV:
         env.pop(key, None)
     host = settings.get('online_host', '').strip().strip('[]') or SHADNET_HOST

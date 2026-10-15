@@ -421,7 +421,11 @@ namespace BloodborneLauncher
             if (ini.Get("online_enabled") == "1")
             {
                 // The engine refuses these at start; say so here instead.
-                var problem = ini.Get("online_host").Trim().Length == 0 ? "Enter the server before playing online."
+                var problem = ini.Get("online_pool", "shadnet") == "huntersdream"
+                    ? (s.OnlineThdToken.Length == 0 || s.Str("online_thd_name").Length == 0
+                        ? "Sign in to The Hunter's Dream with Discord on the Online page before playing online."
+                        : null)
+                    : ini.Get("online_host").Trim().Length == 0 ? "Enter the server before playing online."
                     : ini.Get("online_username").Contains('@') ? "The account name is the name registered on the server, not an email address."
                     : ini.Get("online_username").Trim().Length == 0 ? "Enter the account name before playing online."
                     : s.OnlinePassword.Length == 0 ? "Enter the shadNet account password before playing online."
