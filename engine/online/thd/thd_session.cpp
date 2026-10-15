@@ -191,27 +191,37 @@ HttpResult Perform(const std::string& base, const std::string& path, const std::
                    int timeout_ms) {
     thread_local std::map<std::string, std::unique_ptr<httplib::Client>> clients;
     auto& cli = clients[base];
-    if (!cli) {
+    const auto timeout = std::chrono::milliseconds(timeout_ms);
+    auto open = [&] {
         cli = std::make_unique<httplib::Client>(base);
         cli->set_keep_alive(true);
         cli->set_follow_location(false);
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
         cli->enable_server_certificate_verification(Cfg().verify_tls);
 #endif
-    }
-    const auto timeout = std::chrono::milliseconds(timeout_ms);
-    cli->set_connection_timeout(timeout);
-    cli->set_read_timeout(timeout);
-    cli->set_write_timeout(timeout);
+    };
+    const bool reused = cli != nullptr;
+    if (!cli) open();
     httplib::Headers headers{{"Accept", "application/json"},
                              {"User-Agent", Cfg().client},
                              {"X-BBHost-Ruleset", Cfg().ruleset}};
     if (const std::string token = AccountToken(); !token.empty()) {
         headers.emplace("X-BB-Token", token);
     }
+    auto send = [&] {
+        cli->set_connection_timeout(timeout);
+        cli->set_read_timeout(timeout);
+        cli->set_write_timeout(timeout);
+        return post ? cli->Post(path, headers, *post, "application/json") : cli->Get(path, headers);
+    };
     HttpResult r;
-    httplib::Result res = post ? cli->Post(path, headers, *post, "application/json")
-                               : cli->Get(path, headers);
+    httplib::Result res = send();
+    // A kept-alive connection the server closed meanwhile fails on its first read or write
+    // ("Failed to read connection"): once more on a new one, as bbhost's fresh request would.
+    if (!res && reused && (res.error() == httplib::Error::Read || res.error() == httplib::Error::Write)) {
+        open();
+        res = send();
+    }
     if (!res) {
         r.error = httplib::to_string(res.error());
         cli.reset(); // a fresh connection next time
