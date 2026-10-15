@@ -63,12 +63,11 @@ def http_base(text):
 
 def game_overrides(game_api):
     overrides = {GAME_STATUS_ORIGIN: game_api}
-    overrides.update({h: f'http://{urlsplit(game_api).hostname}:{GAME_API_PORT}' for h in PLAY_LOG_HOSTS})
+    overrides.update({h: f'{urlsplit(game_api).scheme}://{urlsplit(game_api).hostname}:{GAME_API_PORT}' for h in PLAY_LOG_HOSTS})
     return overrides
 
-# Online play is paused while the connection is reworked together with The Hunter's Dream team: the
-# game stays offline whatever bbport.ini says (BB_ONLINE_PAUSED=0 lifts it, for that work).
-ONLINE_PAUSED = os.environ.get('BB_ONLINE_PAUSED', '1') != '0'
+# BB_ONLINE_PAUSED=1 keeps the game offline whatever bbport.ini says.
+ONLINE_PAUSED = os.environ.get('BB_ONLINE_PAUSED', '0') == '1'
 
 
 def configure_online(settings, data, env):

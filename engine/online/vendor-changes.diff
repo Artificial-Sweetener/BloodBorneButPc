@@ -1,3 +1,47 @@
+diff --git a/a/core/libraries/network/http.cpp b/b/core/libraries/network/http.cpp
+index a78e1eb..db1a8e8 100644
+--- a/a/core/libraries/network/http.cpp
++++ b/b/core/libraries/network/http.cpp
+@@ -365,6 +365,10 @@ static const HostOverrideState& GetHostOverrideState() {
+     return s;
+ }
+ 
++// bbport: The Hunter's Dream backend (gpu/bbnet/thd).
++extern "C" bool bbthd_enabled();
++extern "C" void bbthd_add_game_headers(std::vector<std::pair<std::string, std::string>>* headers);
++
+ bool ApplyHostOverride(std::string& scheme, std::string& host, u16& port, bool& is_secure) {
+     const auto& state = GetHostOverrideState();
+     if (state.entries.empty()) {
+@@ -385,6 +389,17 @@ bool ApplyHostOverride(std::string& scheme, std::string& host, u16& port, bool&
+     if (it == state.entries.end()) {
+         it = state.entries.find(host);
+     }
++    if (it == state.entries.end()) {
++        // bbport: "*.example.com" matches every host under it.
++        for (auto e = state.entries.begin(); e != state.entries.end(); ++e) {
++            const std::string& key = e->first;
++            if (key.size() > 2 && key[0] == '*' && key[1] == '.' && host.size() > key.size() - 1 &&
++                host.compare(host.size() - (key.size() - 1), key.size() - 1, key, 1) == 0) {
++                it = e;
++                break;
++            }
++        }
++    }
+     if (it == state.entries.end()) {
+         it = state.entries.find("*");
+     }
+@@ -1745,6 +1760,10 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
+                                                         ? tmpl_user_agent
+                                                         : BuildLibhttpUserAgent(""));
+         }
++        // bbport: The Hunter's Dream binds the game's requests to the account and its ruleset.
++        if (bbthd_enabled()) {
++            bbthd_add_game_headers(&plan.headers);
++        }
+         // Pull Content-Type out of headers
+         for (const auto& [k, v] : plan.headers) {
+             if (HeaderNameMatches(k, "Content-Type")) {
 diff --git a/a/core/libraries/np/np_manager.cpp b/b/core/libraries/np/np_manager.cpp
 index 4591814..0759787 100644
 --- a/a/core/libraries/np/np_manager.cpp
@@ -56,47 +100,3 @@ index 1d8b958..f05d5cb 100644
  }
  
  u64 ShadNetClient::ReportClientVersion() {
-diff --git a/a/core/libraries/network/http.cpp b/b/core/libraries/network/http.cpp
-index a78e1eb..db1a8e8 100644
---- a/a/core/libraries/network/http.cpp
-+++ b/b/core/libraries/network/http.cpp
-@@ -365,6 +365,10 @@ static const HostOverrideState& GetHostOverrideState() {
-     return s;
- }
- 
-+// bbport: The Hunter's Dream backend (gpu/bbnet/thd).
-+extern "C" bool bbthd_enabled();
-+extern "C" void bbthd_add_game_headers(std::vector<std::pair<std::string, std::string>>* headers);
-+
- bool ApplyHostOverride(std::string& scheme, std::string& host, u16& port, bool& is_secure) {
-     const auto& state = GetHostOverrideState();
-     if (state.entries.empty()) {
-@@ -385,6 +389,17 @@ bool ApplyHostOverride(std::string& scheme, std::string& host, u16& port, bool&
-     if (it == state.entries.end()) {
-         it = state.entries.find(host);
-     }
-+    if (it == state.entries.end()) {
-+        // bbport: "*.example.com" matches every host under it.
-+        for (auto e = state.entries.begin(); e != state.entries.end(); ++e) {
-+            const std::string& key = e->first;
-+            if (key.size() > 2 && key[0] == '*' && key[1] == '.' && host.size() > key.size() - 1 &&
-+                host.compare(host.size() - (key.size() - 1), key.size() - 1, key, 1) == 0) {
-+                it = e;
-+                break;
-+            }
-+        }
-+    }
-     if (it == state.entries.end()) {
-         it = state.entries.find("*");
-     }
-@@ -1745,6 +1760,10 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
-                                                         ? tmpl_user_agent
-                                                         : BuildLibhttpUserAgent(""));
-         }
-+        // bbport: The Hunter's Dream binds the game's requests to the account and its ruleset.
-+        if (bbthd_enabled()) {
-+            bbthd_add_game_headers(&plan.headers);
-+        }
-         // Pull Content-Type out of headers
-         for (const auto& [k, v] : plan.headers) {
-             if (HeaderNameMatches(k, "Content-Type")) {
