@@ -132,6 +132,12 @@ namespace BloodborneLauncher.Core
             }
             // The account password never goes to bbport.ini; the engine takes it from here.
             if (s.OnlinePassword is { Length: > 0 } password) env["BB_SHADNET_PASSWORD"] = password;
+            // The Hunter's Dream account (scripts/online.py uses it in that pool only).
+            if (s.OnlineThdToken is { Length: > 0 } token && s.Str("online_thd_name") is { Length: > 0 } name)
+            {
+                env["BB_THD_TOKEN"] = token;
+                env["BB_THD_ONLINE_ID"] = name;
+            }
             // What this client reports to the shadNet server after signing in (it signs out clients that report none).
             env["BB_CLIENT_VERSION"] = $"BloodBorneButPc {Updater.CurrentLabel}";
 

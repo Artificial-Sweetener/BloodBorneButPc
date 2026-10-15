@@ -57,6 +57,7 @@
 #include "core/libraries/np/np_utility/np_utility.h"
 #include "core/libraries/np/np_web_api/np_web_api.h"
 #include "core/libraries/np/np_web_api2/np_web_api2.h"
+#include "thd/thd.h"
 
 extern "C" {
 int32_t runtime_thread_spawn(void** out, void* PS4_SYSV_ABI (*entry)(void*), void* argument,
@@ -383,12 +384,28 @@ void Unregister() {}
 
 namespace Libraries::Np::NpManager { void InitializeRuntime(); }
 extern "C" void bbnet_initialize(void) {
+    if (BbThd::Enabled()) {
+        BbThd::Initialize();
+        return;
+    }
     Libraries::Np::NpManager::InitializeRuntime();
+}
+
+extern "C" void bbnet_set_image(unsigned char* image, uint64_t size) {
+    BbThd::SetImage(image, size);
 }
 
 extern "C" void bbnet_register(void) {
     Core::Loader::SymbolsResolver resolver;
     Core::Loader::SymbolsResolver* sym = &resolver;
+    if (BbThd::Enabled()) {
+        // The Hunter's Dream: its NP and sceNet imports; the game's HTTP stays sceHttp's.
+        BbThd::Register(sym);
+        Libraries::Http::RegisterLib(sym);
+        Libraries::Http2::RegisterLib(sym);
+        Libraries::Ssl2::RegisterLib(sym);
+        return;
+    }
     Libraries::Net::RegisterLib(sym);
     Libraries::NetCtl::RegisterLib(sym);
     Libraries::Http::RegisterLib(sym);

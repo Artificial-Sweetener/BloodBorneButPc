@@ -17,7 +17,8 @@ file(GLOB_RECURSE BBNET_SOURCES CONFIGURE_DEPENDS
     vendor/shadps4/core/libraries/net/*.cpp vendor/shadps4/core/libraries/network/*.cpp
     vendor/shadps4/core/libraries/np/*.cpp vendor/shadps4/core/net/*.cpp
     vendor/shadps4/shadnet/*.cpp)
-add_library(bbnet STATIC ${BBNET_SOURCES} ${BBNET_PROTO_OUT}/shadnet.pb.cc bbnet_glue.cpp)
+file(GLOB BBNET_THD_SOURCES CONFIGURE_DEPENDS thd/*.cpp)
+add_library(bbnet STATIC ${BBNET_SOURCES} ${BBNET_THD_SOURCES} ${BBNET_PROTO_OUT}/shadnet.pb.cc bbnet_glue.cpp)
 target_include_directories(bbnet PRIVATE include ../shim ${BBNET_VENDOR}
     ${BBNET_VENDOR}/shadnet ../shadps4 ${BBNET_PROTO_OUT} ../third_party/imgui third_party/httplib)
 target_compile_definitions(bbnet PRIVATE BOOST_ASIO_STANDALONE NDEBUG

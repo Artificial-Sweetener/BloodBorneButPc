@@ -1,86 +1,88 @@
-using System.Diagnostics;
-using System.IO;
+using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// The Hunter's Dream co-op pool (online_pool=huntersdream), with bbhost's players, through
-    /// bbbridge by MaskZeus (GPL-3.0-or-later, the package's bbbridge folder): scripts/online.py and
-    /// run_windows.py start it with the game. Here: its Discord sign-in and the accounts it holds,
-    /// in network\bbbridge\ beside bbport.ini (updates keep that folder).
+    /// The Hunter's Dream co-op pool (online_pool=huntersdream): its account, linked with Discord
+    /// the way bbhost does it (a device code approved on the website). The token is kept encrypted
+    /// in the launcher's settings and passed to the game when it starts; the engine's own
+    /// Hunter's Dream backend uses it.
     /// </summary>
     public static class HuntersDream
     {
-        public static string Folder => Path.Combine(Paths.DataDir, "network", "bbbridge");
-        public static string StateFile => Path.Combine(Folder, "bbbridge_state.json");
-        public static string Cli => Path.Combine(Paths.PortDir, "bbbridge", "bbbridge-cli.exe");
-
-        /// <summary>bbbridge's settings file, pointing at its account file here (as online.py writes it).</summary>
-        public static string ConfigFile()
+        /// <summary>The account service: the game server's origin (The Hunter's Dream unless another is set).</summary>
+        public static string AuthBase(string gameServer)
         {
-            Directory.CreateDirectory(Folder);
-            var path = Path.Combine(Folder, "bbbridge_config.json");
-            JsonObject config;
-            try { config = JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? new JsonObject(); }
-            catch (Exception) { config = new JsonObject(); }
-            var state = Path.GetFullPath(StateFile);
-            if (config["state_file"]?.GetValue<string>() != state)
-            {
-                config["state_file"] = state;
-                File.WriteAllText(path, config.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
-            }
-            return path;
+            var uri = new Uri(Online.GameServer(gameServer));
+            return $"{uri.Scheme}://{uri.Host}";
         }
 
-        /// <summary>The accounts signed in on this PC (their online names).</summary>
-        public static List<string> Accounts()
+        private static async Task<JsonObject> CallAsync(HttpClient http, string url, JsonObject body, CancellationToken cancel)
+        {
+            using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+            using var response = await http.PostAsync(url, content, cancel);
+            var text = await response.Content.ReadAsStringAsync(cancel);
+            JsonObject? reply = null;
+            try { reply = JsonNode.Parse(text) as JsonObject; } catch (JsonException) { }
+            if (reply is null || reply["ResKind"] is null)
+                throw new InvalidOperationException($"{url} has no account service (HTTP {(int)response.StatusCode})");
+            if (reply["ResKind"]!.GetValue<int>() != 0)
+                throw new InvalidOperationException(reply["Message"]?.GetValue<string>() ?? "refused");
+            return reply;
+        }
+
+        /// <summary>Discord sign-in: <paramref name="code"/> gets (page, code) to approve there.
+        /// Returns the account's name and token, or throws with the server's reason.</summary>
+        public static async Task<(string Name, string Token)> SignInAsync(string gameServer, Action<string, string> code,
+            CancellationToken cancel)
+        {
+            var auth = AuthBase(gameServer);
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            var device = $"BloodBorneButPc on {Environment.MachineName}";
+            var start = await CallAsync(http, auth + "/auth/device/start", new JsonObject { ["DeviceName"] = device }, cancel);
+            var deviceCode = start["DeviceCode"]?.GetValue<string>() ?? "";
+            var userCode = start["UserCode"]?.GetValue<string>() ?? "";
+            if (deviceCode.Length == 0 || userCode.Length == 0) throw new InvalidOperationException("no code in the reply");
+            var interval = Math.Max(1, start["Interval"]?.GetValue<int>() ?? 5);
+            var expires = DateTime.UtcNow.AddSeconds(start["ExpiresIn"]?.GetValue<int>() ?? 600);
+            code(start["VerificationUri"]?.GetValue<string>() ?? auth + "/link", userCode);
+            while (DateTime.UtcNow < expires)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(interval), cancel);
+                var poll = await CallAsync(http, auth + "/auth/device/poll", new JsonObject { ["DeviceCode"] = deviceCode }, cancel);
+                switch (poll["Status"]?.GetValue<string>())
+                {
+                    case "approved":
+                        var name = poll["OnlineId"]?.GetValue<string>() ?? "";
+                        var token = poll["Token"]?.GetValue<string>() ?? "";
+                        if (name.Length == 0 || token.Length == 0) throw new InvalidOperationException("no token in the reply");
+                        return (name, token);
+                    case "slow_down":
+                        interval += 5;
+                        break;
+                    case "denied":
+                        throw new InvalidOperationException("the sign-in was denied");
+                    case "expired":
+                        throw new InvalidOperationException("the code expired; try again");
+                }
+            }
+            throw new InvalidOperationException("the code expired; try again");
+        }
+
+        /// <summary>Tells the server to forget the token (best effort).</summary>
+        public static async Task SignOutAsync(string gameServer, string token)
         {
             try
             {
-                if (JsonNode.Parse(File.ReadAllText(StateFile))?["accounts"] is JsonObject accounts)
-                    return accounts.Select(a => a.Key).ToList();
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                await CallAsync(http, AuthBase(gameServer) + "/auth/logout", new JsonObject { ["Token"] = token }, CancellationToken.None);
             }
-            catch (Exception) { }
-            return new List<string>();
-        }
-
-        /// <summary>Discord sign-in: bbbridge-cli shows a code for thehuntersdream.com and waits
-        /// until it is approved there. <paramref name="code"/> gets (page, code) once it is known.
-        /// Returns the account's name, or throws with bbbridge's reason.</summary>
-        public static async Task<string> SignInAsync(Action<string, string> code, CancellationToken cancel)
-        {
-            if (!File.Exists(Cli)) throw new InvalidOperationException($"{Cli} is missing: reinstall the package.");
-            var start = new ProcessStartInfo(Cli)
+            catch (Exception)
             {
-                WorkingDirectory = Folder,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true,
-            };
-            start.ArgumentList.Add("--config");
-            start.ArgumentList.Add(ConfigFile());
-            start.ArgumentList.Add("--link-discord");
-            using var process = Process.Start(start) ?? throw new InvalidOperationException("bbbridge did not start");
-            using var stop = cancel.Register(() => { try { process.Kill(); } catch (Exception) { } });
-            string? result = null;
-            while (await process.StandardOutput.ReadLineAsync() is { } line)
-            {
-                // "Open <page> and enter the code <code>", then "signed in as <name>" or "failed: <why>".
-                const string open = "Open ", enter = " and enter the code ";
-                var at = line.IndexOf(enter, StringComparison.Ordinal);
-                if (line.StartsWith(open, StringComparison.Ordinal) && at > 0)
-                    code(line[open.Length..at], line[(at + enter.Length)..].Trim());
-                else
-                    result = line.Trim();
             }
-            await process.WaitForExitAsync();
-            cancel.ThrowIfCancellationRequested();
-            const string signed = "signed in as ";
-            if (result is { } r && r.StartsWith(signed, StringComparison.Ordinal))
-                return r[signed.Length..];
-            throw new InvalidOperationException(result is { } f && f.StartsWith("failed: ") ? f["failed: ".Length..] : "the sign-in did not finish");
         }
     }
 }

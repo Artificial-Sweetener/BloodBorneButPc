@@ -14962,7 +14962,7 @@ index 0000000..2336643
 +
 +} // namespace VideoCore
 diff --git a/gpu/shim/bbgpu.cpp b/gpu/shim/bbgpu.cpp
-index f38aea7..6b80f76 100644
+index f38aea7..61f823a 100644
 --- a/gpu/shim/bbgpu.cpp
 +++ b/gpu/shim/bbgpu.cpp
 @@ -8,6 +8,7 @@
@@ -15104,7 +15104,7 @@ index f38aea7..6b80f76 100644
  extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
      // BB_LABEL_TRAP (diagnostic): its read-only label pages first. Not passed on to GPU page
      // tracking (a write fault drains the draw pipe: thousands a second would change the timing
-@@ -372,9 +445,18 @@ extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
+@@ -372,12 +445,23 @@ extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
          return 1;
      }
      if (Core::Signals::Instance()->DispatchAccessViolation(ucontext, address)) {
@@ -15123,8 +15123,13 @@ index f38aea7..6b80f76 100644
 +    return runtime_memory_restore_access(ucontext, reinterpret_cast<uintptr_t>(address), 0);
  }
  
++extern "C" void bbnet_set_image(unsigned char* image, uint64_t size);
  extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
-@@ -406,11 +488,13 @@ static void KernelServiceThread(std::stop_token stoken) {
++    bbnet_set_image(image, size); // before the engine's hooks change the code it checks
+     BbGnmHooks::PatchImage(image, size);
+     BbEngine::Install(image, size);
+ }
+@@ -406,11 +490,13 @@ static void KernelServiceThread(std::stop_token stoken) {
          {
              std::unique_lock lock{m_asio_req};
              cv_asio_req.wait(lock, stoken, [] { return asio_requests != 0; });
@@ -25862,7 +25867,7 @@ index 9860c61..f46e297 100644
      base = 32 + count * 32
      header = unpack('<16sHHIQQQIHHHHHH', data, base)
 diff --git a/scripts/run_windows.py b/scripts/run_windows.py
-index ea6daf1..04eec28 100644
+index ea6daf1..2a6af58 100644
 --- a/scripts/run_windows.py
 +++ b/scripts/run_windows.py
 @@ -10,12 +10,15 @@ The game folder: --game-dir, else BB_GAME_DIR, else the last one used (out/game_
@@ -25978,68 +25983,9 @@ index ea6daf1..04eec28 100644
      if fps not in ('30', '60', '90'):
          print(f'Unsupported Windows FPS preset {fps!r}; using 60 FPS.', flush=True)
          fps = '60'
-@@ -102,6 +181,56 @@ def configure_frame_rate(env):
-     return fps
- 
- 
-+def bridge_listening():
-+    import socket
-+    from online import BRIDGE_HOST, BRIDGE_PORT
-+    try:
-+        socket.create_connection((BRIDGE_HOST, BRIDGE_PORT), timeout=0.5).close()
-+        return True
-+    except OSError:
-+        return False
-+
-+
-+def start_bridge(data):
-+    """The Hunter's Dream pool: starts bbbridge-cli (bbbridge/, MaskZeus, GPL-3.0-or-later) for
-+    this launch and returns it, or None when a bridge already listens (bbbridge's own app)."""
-+    from online import bridge_folder
-+    if bridge_listening():
-+        print("Co-op: The Hunter's Dream through the bbbridge already running", flush=True)
-+        return None
-+    cli = ROOT / 'bbbridge' / 'bbbridge-cli.exe'
-+    if not cli.is_file():
-+        sys.exit(f"The Hunter's Dream: {cli} is missing (reinstall the package).")
-+    folder, config = bridge_folder(data)
-+    log = folder / 'bbbridge.log'
-+    process = subprocess.Popen([str(cli), '--config', str(config), '--log', str(log)], cwd=folder,
-+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-+                               stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
-+    for _ in range(100):
-+        if bridge_listening():
-+            print(f"Co-op: The Hunter's Dream as {os.environ.get('BB_SHADNET_NPID')}, through bbbridge "
-+                  f'(log: {log})', flush=True)
-+            return process
-+        if process.poll() is not None:
-+            try:
-+                tail = ''.join(log.read_text(encoding='utf-8', errors='replace').splitlines(True)[-5:])
-+            except OSError:
-+                tail = ''
-+            sys.exit(f'bbbridge stopped at start (exit code {process.returncode}):\n{tail}')
-+        time.sleep(0.1)
-+    process.terminate()
-+    sys.exit("bbbridge did not start listening within 10 s (see network/bbbridge/bbbridge.log).")
-+
-+
-+def stop_bridge(process):
-+    if process and process.poll() is None:
-+        process.terminate()
-+        try:
-+            process.wait(timeout=5)
-+        except subprocess.TimeoutExpired:
-+            process.kill()
-+
-+
- def main():
-     arguments = sys.argv[1:]
-     game = os.environ.get('BB_GAME_DIR')
-@@ -138,39 +267,45 @@ def main():
-                        '--config', os.environ.get('BB_MODS_CONFIG', data / 'mods.json'),
+@@ -139,38 +218,43 @@ def main():
                         '--enabled', os.environ.get('BB_MODS_ENABLED', '1')], capture=True))
      overlay = merged if merged.resolve() != original else None
-+    bridge = None
      try:
 -        for script, extra in (('prepare.py', []), ('link_libc.py', []), ('link_modules.py', []),
 -                              ('content_profile.py', ['--sku', os.environ.get('BB_CONTENT_SKU', 'full')])):
@@ -26107,7 +26053,7 @@ index ea6daf1..04eec28 100644
          # Sizes chosen below for the previous launch are recomputed after an in-game restart.
          if os.environ.get('BB_AUTO_RENDER_RES') == '1':
              for key in ('BB_RENDER_RES', 'BB_OUTPUT_RES', 'BB_AUTO_RENDER_RES'):
-@@ -192,14 +327,30 @@ def main():
+@@ -192,14 +276,30 @@ def main():
              print(f'Output {scaled_output}: live resolution changes (live_resolution=0: startup patch)')
          elif scaled_output:
              os.environ.update(BB_RENDER_RES=scaled_render, BB_OUTPUT_RES=scaled_output, BB_AUTO_RENDER_RES='1')
@@ -26140,18 +26086,7 @@ index ea6daf1..04eec28 100644
          probe = ROOT / os.environ.get('BB_PROBE', out / 'bb-probe.exe')
          command = [probe, out / 'boot-linked.bin', '--content-profile', out / 'content.bin',
                     '--patches', out / 'patches.bin', '--app0', merged,
-@@ -208,6 +359,10 @@ def main():
-         # MSYS2's DLLs (libc++, SDL3, FFmpeg, ...). System32 is searched before PATH, so the
-         # Vulkan loader stays the one installed with the GPU driver.
-         os.environ['PATH'] = os.pathsep.join([str(msys_root() / 'clang64/bin'), os.environ.get('PATH', '')])
-+        # Started last, after the slow steps: an in-game restart runs this script again while the
-+        # previous one is still stopping its bridge.
-+        if os.environ.get('BB_BRIDGE') == '1':
-+            bridge = start_bridge(data)
-         print('Starting:', ' '.join(shlex.quote(str(c)) for c in command), flush=True)
-         try:
-             status = subprocess.call(
-@@ -219,8 +374,11 @@ def main():
+@@ -219,7 +319,9 @@ def main():
          except KeyboardInterrupt:
              status = 130
          print(f'bb-probe exited with code {status}', flush=True)
@@ -26160,10 +26095,8 @@ index ea6daf1..04eec28 100644
 +        # 32-bit value the launcher reads, not -1.
 +        return status - (1 << 32) if status >= (1 << 31) else status
      finally:
-+        stop_bridge(bridge)
          if overlay:
              remove_overlay(overlay)
- 
 diff --git a/src/host_sync.h b/src/host_sync.h
 index bab54c6..7c90dfb 100644
 --- a/src/host_sync.h

@@ -38,6 +38,8 @@ namespace BloodborneLauncher.Core
             ["vk_validation"] = false,
             ["extra_env"] = "",
             ["online_password"] = "",
+            ["online_thd_name"] = "",
+            ["online_thd_token"] = "",
             // This launcher.
             ["port_dir"] = "",
             ["launch_method"] = "windows",
@@ -122,6 +124,13 @@ namespace BloodborneLauncher.Core
             get => Secret.Unprotect(Str("online_password"));
             // Should Windows refuse to encrypt it, it stays as typed rather than being lost.
             set => Set("online_password", Secret.Protect(value) is { Length: > 0 } encrypted ? encrypted : value);
+        }
+
+        /// <summary>The Hunter's Dream account's token from the Discord sign-in, kept encrypted like the password.</summary>
+        public string OnlineThdToken
+        {
+            get => Secret.Unprotect(Str("online_thd_token"));
+            set => Set("online_thd_token", value.Length == 0 ? "" : Secret.Protect(value) is { Length: > 0 } encrypted ? encrypted : value);
         }
 
         public string Str(string key)

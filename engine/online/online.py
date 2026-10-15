@@ -22,9 +22,11 @@ SHADNET_WEBAPI = f'http://{SHADNET_HOST}:31315'
 DEFAULT_P2P_PORT = 3658
 # Seconds a summon sign entry waits for its host (the game's 180; engine/online_fixes.cpp).
 DEFAULT_SIGN_TIMEOUT = 30
+THD_ENV = ('BB_NET_BACKEND', 'BB_THD_SERVER', 'BB_THD_AUTH', 'BB_THD_TOKEN', 'BB_THD_ONLINE_ID',
+           'BB_THD_RULESET')
 ONLINE_ENV = ('BB_ONLINE', 'BB_SHADNET_SERVER', 'BB_SHADNET_WEBAPI', 'BB_SHADNET_NPID',
               'BB_SHADNET_PASSWORD', 'BB_SHADNET_TOKEN', 'BB_UPNP', 'BB_P2P_PORT',
-              'SHADPS4_HTTP_HOST_OVERRIDES_JSON', 'BB_SIGN_TIMEOUT')
+              'SHADPS4_HTTP_HOST_OVERRIDES_JSON', 'BB_SIGN_TIMEOUT') + THD_ENV
 
 def read_settings(path):
     settings = {}
@@ -79,6 +81,10 @@ def configure_online(settings, data, env):
             env.pop(key, None)
         env['BB_ONLINE'] = '0'
         return None
+    if settings.get('online_pool') == 'huntersdream':
+        return configure_huntersdream(settings, data, env)
+    for key in THD_ENV:
+        env.pop(key, None)
     host = settings.get('online_host', '').strip().strip('[]') or SHADNET_HOST
     if any(c.isspace() or ord(c) < 32 for c in host) or any(c in host for c in '/@?#:'):
         raise ValueError('Enter a shadNet server name without a scheme, path or port')
@@ -110,6 +116,48 @@ def configure_online(settings, data, env):
                BB_UPNP='0' if settings.get('online_upnp') == '0' else '1',
                BB_P2P_PORT=str(int(p2p)) if p2p else str(DEFAULT_P2P_PORT),
                SHADPS4_HTTP_HOST_OVERRIDES_JSON=str(destination.resolve()))
+    timeout = settings.get('online_sign_timeout', '').strip()
+    env['BB_SIGN_TIMEOUT'] = str(min(max(int(timeout), 0), 600)) if timeout.isdigit() else str(DEFAULT_SIGN_TIMEOUT)
+    return destination
+
+
+def p2p_port(settings):
+    p2p = settings.get('online_p2p_port', '').strip()
+    if p2p and not 1 <= int(p2p) <= 65535:
+        raise ValueError('Local P2P port must be between 1 and 65535, or empty for the default (3658)')
+    return str(int(p2p)) if p2p else str(DEFAULT_P2P_PORT)
+
+
+def write_overrides(data, overrides):
+    destination = Path(data) / 'network/host_overrides.json'
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix('.json.tmp')
+    temporary.write_text(json.dumps(overrides, indent=2), encoding='utf-8')
+    os.replace(temporary, destination)
+    return destination
+
+
+def configure_huntersdream(settings, data, env):
+    """The Hunter's Dream pool: the engine's own backend for it (BB_NET_BACKEND=thd), bbhost's
+    protocol. The game's servers (*.scej-network.jp, its own ports) and play logs (the API port)
+    go to the game server; the account comes from the launcher's Discord sign-in."""
+    game_api = http_base(game_server(settings.get('online_game_api', '')))
+    origin = urlsplit(game_api)
+    if origin.path not in ('', '/'):
+        raise ValueError('The game server needs an origin without a path')
+    if not env.get('BB_THD_TOKEN') or not env.get('BB_THD_ONLINE_ID'):
+        raise ValueError("Sign in to The Hunter's Dream with Discord on the launcher's Online page")
+    scheme, host = origin.scheme, origin.hostname
+    base = f'{scheme}://{host}'
+    overrides = {'*.scej-network.jp': base}
+    overrides.update({h: f'{base}:{GAME_API_PORT}' for h in PLAY_LOG_HOSTS})
+    destination = write_overrides(data, overrides)
+    for key in ('BB_SHADNET_SERVER', 'BB_SHADNET_WEBAPI', 'BB_SHADNET_NPID', 'BB_SHADNET_PASSWORD',
+                'BB_SHADNET_TOKEN', 'BB_UPNP'):
+        env.pop(key, None)
+    env.update(BB_ONLINE='1', BB_NET_BACKEND='thd', BB_THD_SERVER=f'{base}:{GAME_API_PORT}',
+               BB_THD_AUTH=base, BB_THD_RULESET=settings.get('online_thd_ruleset', '').strip() or 'vanilla',
+               BB_P2P_PORT=p2p_port(settings), SHADPS4_HTTP_HOST_OVERRIDES_JSON=str(destination.resolve()))
     timeout = settings.get('online_sign_timeout', '').strip()
     env['BB_SIGN_TIMEOUT'] = str(min(max(int(timeout), 0), 600)) if timeout.isdigit() else str(DEFAULT_SIGN_TIMEOUT)
     return destination

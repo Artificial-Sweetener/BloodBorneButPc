@@ -184,7 +184,7 @@
         public static readonly Choice[] CoopPools =
         {
             new("The Hunter's Dream (with bbhost players)", "huntersdream",
-                "Sign in with Discord below; bbbridge (by MaskZeus) starts with the game"),
+                "Sign in with Discord below; the game speaks The Hunter's Dream's own protocol, as bbhost does"),
             new("shadNet server", "shadnet", "A shadNet account on the server below"),
         };
 

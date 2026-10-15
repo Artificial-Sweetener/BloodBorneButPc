@@ -9,9 +9,9 @@ namespace BloodborneLauncher.Views
 {
     /// <summary>
     /// Online play. Messages, bloodstains and ghosts come from the game server (The Hunter's Dream
-    /// by default); sign-in, bells and summons go through a shadNet server. The engine reads these
-    /// from bbport.ini (online_*, scripts/online.py); only the password stays out of it and is
-    /// passed when the game starts.
+    /// by default); sign-in, bells and summons go through the co-op pool: The Hunter's Dream itself
+    /// (its Discord account) or a shadNet server. The engine reads these from bbport.ini (online_*,
+    /// scripts/online.py); the password and the token stay out of it and are passed when the game starts.
     /// </summary>
     public sealed class OnlinePage : LauncherPage
     {
@@ -57,7 +57,7 @@ namespace BloodborneLauncher.Views
                 "thehuntersdream.com", () => Ini.Get("online_game_api"),
                 v => Ini.Set("online_game_api", v.Trim().Length == 0 ? "" : Online.GameServer(v)));
 
-            Group("Co-op server (sign-in, bells and summons)");
+            Group("shadNet co-op server (sign-in, bells and summons)");
             Body.Children.Add(Text("A shadNet server: srv.shadps4.net, port 31313, is shadPS4's public one. For a private server, use the " +
                                    "address, port and web address its owner gives you.", "Faint"));
             IniText(SymbolRegular.Server24, "Server", "Host name only, without a port", "srv.shadps4.net", "online_host");
@@ -65,9 +65,8 @@ namespace BloodborneLauncher.Views
             IniText(SymbolRegular.Link24, "Web API", "Empty: the server with port 31315", "http://srv.shadps4.net:31315", "online_webapi");
 
             Group("Account");
-            Body.Children.Add(Text("A shadNet account (shadPS4's co-op server), not a Hunter's Dream one: The Hunter's Dream " +
-                                   "needs no account here, its messages and bloodstains come on their own (its accounts are for the " +
-                                   "bbhost launcher). Enter the account name you registered (up to 16 characters), not an email " +
+            Body.Children.Add(Text("For the shadNet pool only (The Hunter's Dream pool uses the Discord sign-in above). " +
+                                   "Enter the account name you registered (up to 16 characters), not an email " +
                                    "address. The password is kept encrypted for your Windows user, not in bbport.ini.", "Faint"));
             Add(Card(SymbolRegular.PersonAdd24, "No shadNet account yet?", "Register one on shadPS4's site, then enter it below",
                 SmallButton("Create account", SymbolRegular.Open24, (_, _) =>
@@ -106,15 +105,15 @@ namespace BloodborneLauncher.Views
 
         private void ShowAccount()
         {
-            var accounts = HuntersDream.Accounts();
-            var name = accounts.Contains(Ini.Get("online_thd_account")) ? Ini.Get("online_thd_account") : accounts.FirstOrDefault();
-            SetHint(_thdHint, name is null
+            var name = S.OnlineThdToken.Length > 0 ? S.Str("online_thd_name") : "";
+            SetHint(_thdHint, name.Length == 0
                 ? "Not signed in. Your Discord account becomes your online name; no password is stored"
                 : $"Signed in as {name}");
+            _thdButton.Content = name.Length == 0 ? "Sign in with Discord" : "Sign out";
         }
 
-        /// <summary>bbbridge's Discord sign-in: the code goes to the clipboard and the page opens;
-        /// pressing the button again while it waits cancels.</summary>
+        /// <summary>Discord sign-in to The Hunter's Dream: the code goes to the clipboard and the page
+        /// opens; pressing the button again while it waits cancels. Signed in, the button signs out.</summary>
         private async Task SignInAsync()
         {
             if (_signIn is { } running)
@@ -122,17 +121,29 @@ namespace BloodborneLauncher.Views
                 running.Cancel();
                 return;
             }
+            if (S.OnlineThdToken is { Length: > 0 } current)
+            {
+                await HuntersDream.SignOutAsync(Ini.Get("online_game_api"), current);
+                S.OnlineThdToken = "";
+                S.Set("online_thd_name", "");
+                Ws.SaveSoon();
+                Ws.Log("The Hunter's Dream: signed out", LogLevel.Info);
+                ShowAccount();
+                return;
+            }
             _signIn = new CancellationTokenSource();
             _thdButton.Content = "Cancel";
             try
             {
-                var name = await HuntersDream.SignInAsync((page, code) => Dispatcher.Invoke(() =>
+                var (name, token) = await HuntersDream.SignInAsync(Ini.Get("online_game_api"), (page, code) => Dispatcher.Invoke(() =>
                 {
                     try { Clipboard.SetText(code); } catch (Exception) { }
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(page) { UseShellExecute = true });
                     SetHint(_thdHint, $"Enter the code {code} on the page that opened (it is on the clipboard), then approve");
                 }), _signIn.Token);
-                Ini.Set("online_thd_account", name);
+                S.OnlineThdToken = token;
+                S.Set("online_thd_name", name);
+                Ws.SaveSoon();
                 Ini.Set("online_pool", "huntersdream");
                 Ws.Log($"The Hunter's Dream: signed in as {name}", LogLevel.Good);
                 ShowAccount();
@@ -150,7 +161,7 @@ namespace BloodborneLauncher.Views
             {
                 _signIn.Dispose();
                 _signIn = null;
-                _thdButton.Content = "Sign in with Discord";
+                ShowAccount();
             }
         }
 
@@ -161,6 +172,23 @@ namespace BloodborneLauncher.Views
 
         private async Task TestAsync()
         {
+            if (Ini.Get("online_pool", "shadnet") == "huntersdream")
+            {
+                _results.Children.Clear();
+                _test.IsEnabled = false;
+                _test.Content = "Testing…";
+                try
+                {
+                    foreach (var r in await Online.CheckHuntersDreamAsync(Online.GameServer(Ini.Get("online_game_api"))))
+                        ShowResult(r);
+                }
+                finally
+                {
+                    _test.IsEnabled = true;
+                    _test.Content = "Test";
+                }
+                return;
+            }
             var host = Ini.Get("online_host").Trim();
             var port = Ini.Get("online_port", "31313").Trim();
             if (host.Length == 0)
@@ -185,23 +213,26 @@ namespace BloodborneLauncher.Views
                 else
                     Ws.Log("Co-op UDP: no answer outside the game (the server answers signed-in players); summons are the real test", LogLevel.Info);
                 foreach (var r in results)
-                {
-                    var said = r.Ok ? (r.Detail.Length > 0 ? $"Reachable: {r.Detail}" : "Reachable") : $"Not reachable ({r.Detail})";
-                    var card = Card(r.Ok ? SymbolRegular.CheckmarkCircle24 : SymbolRegular.ErrorCircle24,
-                        $"{r.Name}: {r.Address}", said, null, out _);
-                    card.ShowIcon = true;
-                    card.Icon.SetResourceReference(ForegroundProperty, r.Ok ? "GoodTextBrush" : "DangerTextBrush");
-                    SetHint(card.Hint, said);
-                    card.Margin = new Thickness(24, 0, 0, 4);
-                    _results.Children.Add(card);
-                    Ws.Log($"{r.Name} {r.Address}: {(r.Ok ? "reachable" : "not reachable " + r.Detail)}", r.Ok ? LogLevel.Good : LogLevel.Warn);
-                }
+                    ShowResult(r);
             }
             finally
             {
                 _test.IsEnabled = true;
                 _test.Content = "Test";
             }
+        }
+
+        private void ShowResult(Online.Result r)
+        {
+            var said = r.Ok ? (r.Detail.Length > 0 ? $"Reachable: {r.Detail}" : "Reachable") : $"Not reachable ({r.Detail})";
+            var card = Card(r.Ok ? SymbolRegular.CheckmarkCircle24 : SymbolRegular.ErrorCircle24,
+                $"{r.Name}: {r.Address}", said, null, out _);
+            card.ShowIcon = true;
+            card.Icon.SetResourceReference(ForegroundProperty, r.Ok ? "GoodTextBrush" : "DangerTextBrush");
+            SetHint(card.Hint, said);
+            card.Margin = new Thickness(24, 0, 0, 4);
+            _results.Children.Add(card);
+            Ws.Log($"{r.Name} {r.Address}: {(r.Ok ? "reachable" : "not reachable " + r.Detail)}", r.Ok ? LogLevel.Good : LogLevel.Warn);
         }
     }
 }
