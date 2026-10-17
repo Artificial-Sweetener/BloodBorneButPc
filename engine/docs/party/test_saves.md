@@ -1,0 +1,65 @@
+# Test save fixtures (start mid-campaign)
+
+Live party tests never start from a new game: every run Continues a test save (auto-continue) and
+uses test aids to get to the moment it tests. The saves live **outside the repo** under
+`E:\games\bbport\test_saves` (copies only; never the player's `E:\games\bloodborne\user\savedata`).
+Each fixture folder holds a `savedata` tree that `tools/mp/instances.py` copies into an instance
+(`--saves`, or `BB_TEST_SAVES`); `--fresh-saves` copies it again for every run.
+
+| Fixture (`E:\games\bbport\test_saves\...`) | State | Made by |
+|---|---|---|
+| `savedata` (the default) | Character "visy", level 37, in the Hunter's Dream; Cleric Beast, Gascoigne, Vicar Amelia dead; night (9800 + 9801); lamps of Central Yharnam / Cathedral Ward; Oedon Tomb Key, Old Hunter Bell; no chalice | copy of the user's 2026-10-12 backup |
+| `chalice_pthumeru_ritual\savedata` | The default save after the **Pthumeru Chalice ritual at the First Ritual Altar** (Dream gravestone, slot 1: shared fixed dungeon 1110692594440089, glyph `wmqbhonw`, depth 1); Pthumeru Chalice held, Ritual Blood (1) used, 4000 Echoes; standing at the altar | run altar7 below (2026-10-15) |
+| `chalice_hintertomb_ritual\savedata` | The default save after the **Hintertomb Chalice ritual** (goods 6219, depth 2) at the First Ritual Altar: shared fixed dungeon 241243705840283 (glyph `igy8vobq`), the Hintertomb tile set; 4000 Echoes left | run fx_hintertomb below (2026-10-15) |
+| `chalice_loran_ritual\savedata` | The default save after the **Ailing Loran Chalice ritual** (goods 6429, depth 4): shared fixed dungeon 1104142770415792 (glyph `5hm6k63y`), the Loran tile set | run fx_loran below (2026-10-15) |
+| `chalice_isz_ritual\savedata` | The default save after the **Great Isz Chalice ritual** (goods 6539, depth 5): shared fixed dungeon 4036451041035724 (glyph `9xcp9xg4`), the Isz tile set | run fx_isz below (2026-10-15) |
+| `cathedral_day\savedata` | The default save put back **before day -> evening**: 9800 / 9801 off, the Cathedral Ward door event 12400750 off (the door 2401210 is closed and its prompt works again), at the Cathedral Ward lamp 2402950 | run fixture_cw below (2026-10-15) |
+| `rom_dead_dream\savedata` | The default save with **Rom dead** (13201800), in the Hunter's Dream: a lamp travel to Moonside Lake (`host_lamp=3202952` / `BB_PARTY_TEST_START_LAMP=3202952`) plays the Blood Moon scene 13201803 right at the arrival (the lamp is inside its trigger) | run fixture_rom2 below (2026-10-15) |
+| `blood_moon_yahargul\savedata` | After the **Blood Moon**: 9800..9802 on, Rom dead, 70002802 on, in Yahar'gul (m28_00, the scene's warp 2802958) | run fixture_bm below (2026-10-15) |
+| `chalice_pthumeru_inside\savedata` | A **host inside the Pthumeru dungeon** of glyph `ksxx7rqb` (entered by "Enter the party's dungeon"), layer 1 boss 2900100 dead, standing in its boss room: Continue loads the dungeon, a guest title-joins straight into it (used with the guest `chalice_pthumeru_ritual`); the lift car at the top | run g1b3 below (2026-10-15) |
+| `cleric_beast_lamp\savedata` | The default save with the **Cleric Beast alive again** (its b2_seamless 6.7 flags cleared) and the player at the **Great Bridge lamp 2412952** in m24_01 (spawn spot (-124.8, -27.0, 64.3)); walking ~16 m onto the bridge (region 2412805 at (-136.5, 52.8)) starts the first fight. Used by `tools/mp/soak_party.py` (pad-only soak: no aids during the run) | run fixture_cleric below (confid 2026-10-15) |
+
+Use one for a single instance or the host with `--saves`, e.g.
+
+```
+python tools/mp/instances.py run --count 2 --party --fresh-saves --saves E:\games\bbport\test_saves\chalice_pthumeru_ritual\savedata ...
+```
+
+For a **different save per instance** (e.g. a guest that has a ritual dungeon and a host that has
+none), put the fixture into that instance's own copy before the run: `instances.py setup` copies
+`--saves` into `ROOT\instN\user\savedata` only when that folder does not exist, so replace
+`ROOT\inst1\user\savedata` with the fixture's `savedata` folder and keep `--fresh-saves` (it copies
+`savedata` to `savedata_party`, the folder a party session plays from).
+
+## How a fixture is made (reproducible)
+
+One instance, the default save, `--party` (a host alone), test aids only, then copy
+`ROOT\inst0\user\savedata_party` to `E:\games\bbport\test_saves\<name>\savedata` once the game has
+saved (its file times; check with `python -I tools/party/save_decode.py <userdata0000> --flags ID,...`).
+
+* **altar7** (`chalice_pthumeru_ritual`): `BB_PAD_FILE=<root>\pad0.txt` (the walk needs the pad
+  file) and
+  `BB_PARTY_DIRECTOR_TEST=goods=6109:1,goods=7000:2,echoes=5000,approach=-18.27:-16.88:1.3,seq=!cross@Ritual Altar/?cross@Use the Ritual Altar/cross@Search by Chalice Glyph/cross@Select chalice to use/cross@Rite materials/left@Conduct a ritual to create a Chalice Dungeon?/cross/wait/wait`.
+  The Dream's ritual altars are gravestones (m21_00 MSB "メッセンジャー_墓石_D..."):
+  2100954 "Makeshift Altar" at (-15.26, -5.86, -18.77), 2100955 **First Ritual Altar** at
+  (-18.27, -5.43, -16.88), 2100956 at (-20.39, -5.1, -14.14); the chalice set objects 21012x0..x8 sit on
+  them. A `stand=` warp onto them does not move the player (the PlayerIns warp keeps the old spot),
+  so `approach=` walks there (closed loop on the position) and the `seq=` menu walk starts when it
+  arrived (new: `approach` + `seq` without `stand`). Log: `shared fixed chalice dungeon
+  1110692594440089 (glyph wmqbhonw ...) made on first use`, "The ritual is finished, and a chalice
+  rests upon the altar." on screen.
+* **fx_hintertomb / fx_loran / fx_isz** (`chalice_<family>_ritual`): altar7's walk with `prompt=Ritual Altar` (the face taps until the altar's prompt shows) and the family's tab in the chalice list (the list has a tab per family: Pthumeru, Hintertomb, Loran, Isz; Left / Right switch them, wrapping round): `BB_PARTY_DIRECTOR_TEST=goods=6219:1,goods=7001:3,goods=7150:3,echoes=5800,approach=-18.27:-16.88:1.3,prompt=Ritual Altar,seq=!cross@Ritual Altar/?cross@Use the Ritual Altar/cross@Search by Chalice Glyph/right@Select chalice to use/cross/cross@Rite materials/left@Conduct a ritual to create a Chalice Dungeon?/cross/wait/wait` (Hintertomb); Loran: `goods=6429:1,goods=7003:9,goods=7012:4,echoes=9500` and `right@Select chalice to use/right/cross`; Isz: `goods=6539:1,goods=7004:9,goods=7100:3,goods=7050:25,echoes=15500` and `left@Select chalice to use/cross`. Each logs `shared fixed chalice dungeon ... (chalice F, depth D, rites 256) made on first use`; the game saved about 75 s later. The ReturnPointParam rows 2902950..2902956 (the world warper's `chalice` rows) are in every fixed dungeon's MSB, so they lead into whichever dungeon the save has.
+* **fixture_cw** (`cathedral_day`): `BB_PARTY_PROGRESS_TEST_CLEAR=9800,9801,12400750`,
+  `BB_PARTY_TEST_START_LAMP=2402950`.
+* **fixture_rom2** (`rom_dead_dream`): `BB_PARTY_PROGRESS_TEST_SET=13201800`,
+  `BB_PARTY_TEST_START_LAMP=2102950` (a load in the Dream, so the game saves).
+* **fixture_bm** (`blood_moon_yahargul`): `BB_PARTY_PROGRESS_TEST_SET=13201800`,
+  `BB_PARTY_TEST_START_LAMP=3202952`, 140 s (the scene 32000000 plays on arrival, then its warp to
+  Yahar'gul; the game saves there).
+  `BB_PARTY_TEST_START_LAMP=3202952`.
+
+`stand=obj:ENTITY[:DIST[:ANGLE[:BUTTON]]]` (new) stands at a map object as `host_obj` does, then the
+button and `seq=`; for objects on the walkable floor (levers, doors).
+
+* **g1b3** (`chalice_pthumeru_inside`, parfin3): the g1m entry (host default save, guest `chalice_pthumeru_ritual`, `BB_PARTY_ALTAR_AUTO=1`, `approach=-17.0:-16.9:0.35,face=-18.27:-16.88,prompt=First Ritual Altar,seq=cross/?cross@Use the Ritual Altar/wait/down/down/cross`), then `host_move=-45:30.7:-93@30%m29,host_kill=2900100@8%m29`; the host's `savedata_party` copied after the boss-clear (K10). Later runs without `--fresh-saves` Continue in the dungeon.
+* **fixture_cleric** (`cleric_beast_lamp`, confid): one instance, `--party`, `BB_PARTY_PROGRESS_TEST_CLEAR=12411700,12411701,12411702,12411703,12414700,12414701,12414223,72410511,2411,9456,2410`, `BB_PARTY_TEST_START_LAMP=2412952`, `BB_PARTY_DIRECTOR_TEST=log_pos`, 100 s; `savedata_party` copied (save_decode: 12411700 / 9456 / 2411 off).
